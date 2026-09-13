@@ -1,0 +1,126 @@
+# %% [markdown]
+# 
+
+# %%
+
+"""
+Reads a CSV with columns:
+    population, commercial_activity_score, distance_to_city_center_km,
+day_of_week, time_of_day, weather, passenger_demand
+
+Trains both a Multiple Linear Regression (OLS) model and an
+Artificial Neural Network (
+    feedforward, 1 hidden layer of 5 neurons,
+per Heaton's 2008 rule of thumb
+), then compares them using
+RMSE, MAE, MAPE, and R^2 -- matching section 3.8 of the methodology.
+"""
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LinearRegression
+from sklearn.neural_network import MLPRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+
+# %% [markdown]
+#  1. Load data
+
+# %%
+CSV_PATH = "tricycle_passenger_demand_template.csv"  # replace with your real dataset
+df = pd.read_csv(CSV_PATH)
+
+FEATURES_NUMERIC = ["population", "commercial_activity_score", "distance_to_city_center_km"]
+FEATURES_CATEGORICAL = ["day_of_week", "time_of_day", "weather"]
+TARGET = "passenger_demand"
+
+X = df[FEATURES_NUMERIC + FEATURES_CATEGORICAL]
+y = df[TARGET]
+
+# %% [markdown]
+# # 2. Train/test split (80/20, matches section 3.6.2)
+
+# %%
+X_train, X_test, y_train, y_test = train_test_split (
+    X, y, test_size=0.2, random_state=42
+)
+
+
+# %% [markdown]
+# # 3. Preprocessing: one-hot encode categoricals, scale numerics
+# #    (ANN needs scaling; MLR pipeline reuses the same encoding
+# #    so both models see an identical feature set for a fair comparison)
+
+# %%
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("num", StandardScaler(), FEATURES_NUMERIC),
+        ("cat", OneHotEncoder(drop="first", handle_unknown="ignore"), FEATURES_CATEGORICAL),
+    ]
+)
+
+# %% [markdown]
+# # 4. Build models
+
+# %%
+mlr_pipeline = Pipeline([
+    ("preprocess", preprocessor),
+    ("model", LinearRegression()),
+])
+
+ann_pipeline = Pipeline([
+    ("preprocess", preprocessor),
+    ("model", MLPRegressor(
+        hidden_layer_sizes=(5,),   # 1 hidden layer, 5 neurons -- Heaton (2008)
+        activation="relu",
+        solver="adam",
+        max_iter=2000,
+        random_state=42,
+    )),
+])
+
+# %% [markdown]
+# 5. Train
+
+# %%
+mlr_pipeline.fit(X_train, y_train)
+ann_pipeline.fit(X_train, y_train)
+
+# %% [markdown]
+# 6. Evaluate: RMSE, MAE, MAPE, R^2 (section 3.8)
+
+# %%
+def evaluate(model, X_test, y_test, name):
+    y_pred = model.predict(X_test)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    mae = mean_absolute_error(y_test, y_pred)
+    mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
+    r2 = r2_score(y_test, y_pred)
+    return {"Model": name, "RMSE": rmse, "MAE": mae, "MAPE (%)": mape, "R2": r2}
+
+results = pd.DataFrame([
+    evaluate(mlr_pipeline, X_test, y_test, "MLR"),
+    evaluate(ann_pipeline, X_test, y_test, "ANN"),
+])
+
+print(results.to_string(index=False))
+
+
+# %% [markdown]
+# # 7. (Optional) Inspect MLR coefficients for interpretability
+
+# %%
+feature_names = mlr_pipeline.named_steps["preprocess"].get_feature_names_out()
+coefficients = mlr_pipeline.named_steps["model"].coef_
+print("\nMLR coefficients:")
+for name, coef in zip(feature_names, coefficients):
+    print(f"  {name}: {coef:.4f}")
+
+# %%
+print("hi")
+
+
